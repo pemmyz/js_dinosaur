@@ -16,16 +16,20 @@ const DINO_CROUCH_WIDTH = 60;
 const DINO_CROUCH_HEIGHT = 30;
 const DINO_JUMP_POWER = 12;
 const GRAVITY = 0.6;
+const JUMP_CUTOFF_VELOCITY = -4; // Velocity when jump key is released early
 
 // Game speed
 const INITIAL_GAME_SPEED = 5;
 const GAME_SPEED_INCREMENT = 0.001;
+const IDLE_TIMEOUT_DURATION = 5000; // 5 seconds
 
 canvas.width = GAME_WIDTH;
 canvas.height = GAME_HEIGHT;
 
 // --- Game State ---
-let player, gameSpeed, score, highScore, isGameOver, obstacles, clouds, frameCount;
+let player, gameSpeed, score, highScore, obstacles, clouds, frameCount;
+let gameState = 'waiting'; // 'waiting', 'countingDown', 'playing', 'demo', 'gameOver'
+let demoTimeout, countdownInterval, countdownValue;
 
 // --- Player (Dino) Object ---
 class Player {
@@ -45,29 +49,29 @@ class Player {
 
     draw() {
         ctx.fillStyle = '#535353';
-        const currentHitbox = this.getHitbox();
+        const hitbox = this.getHitbox();
 
         if (this.isCrouching) {
-             // Crouched Body
-            ctx.fillRect(currentHitbox.x, currentHitbox.y, currentHitbox.w, currentHitbox.h);
+            // Crouched Body
+            ctx.fillRect(hitbox.x, hitbox.y, hitbox.w, hitbox.h);
             // Crouched Head
-            ctx.fillRect(currentHitbox.x + currentHitbox.w - 15, currentHitbox.y + 5, 20, 15);
+            ctx.fillRect(hitbox.x + hitbox.w - 15, hitbox.y + 5, 20, 15);
         } else {
             // Standing Body
-            ctx.fillRect(currentHitbox.x, currentHitbox.y, currentHitbox.w, currentHitbox.h - 10);
+            ctx.fillRect(hitbox.x, hitbox.y, hitbox.w, hitbox.h - 10);
             // Standing Head
-            ctx.fillRect(currentHitbox.x + currentHitbox.w * 0.7, currentHitbox.y - 10, currentHitbox.w * 0.6, currentHitbox.h * 0.4);
+            ctx.fillRect(hitbox.x + hitbox.w * 0.7, hitbox.y - 10, hitbox.w * 0.6, hitbox.w * 0.4);
             // Arm
-            ctx.fillRect(currentHitbox.x + currentHitbox.w * 0.6, currentHitbox.y + 20, 10, 5);
+            ctx.fillRect(hitbox.x + hitbox.w * 0.6, hitbox.y + 20, 10, 5);
             // Legs
             if (this.isJumping) {
-                ctx.fillRect(currentHitbox.x + 10, currentHitbox.y + currentHitbox.h - 10, 8, 10);
-                ctx.fillRect(currentHitbox.x + currentHitbox.w - 20, currentHitbox.y + currentHitbox.h - 10, 8, 10);
+                ctx.fillRect(hitbox.x + 10, hitbox.y + hitbox.h - 10, 8, 10);
+                ctx.fillRect(hitbox.x + hitbox.w - 20, hitbox.y + hitbox.h - 10, 8, 10);
             } else {
                 if (this.legToggle) {
-                    ctx.fillRect(currentHitbox.x + 5, currentHitbox.y + currentHitbox.h - 10, 8, 10);
+                    ctx.fillRect(hitbox.x + 5, hitbox.y + hitbox.h - 10, 8, 10);
                 } else {
-                    ctx.fillRect(currentHitbox.x + currentHitbox.w - 15, currentHitbox.y + currentHitbox.h - 10, 8, 10);
+                    ctx.fillRect(hitbox.x + hitbox.w - 15, hitbox.y + hitbox.h - 10, 8, 10);
                 }
             }
         }
@@ -100,6 +104,12 @@ class Player {
         }
     }
 
+    cutJump() {
+        if (this.velocityY < 0) {
+            this.velocityY = Math.max(this.velocityY, JUMP_CUTOFF_VELOCITY);
+        }
+    }
+
     crouch() {
         if (!this.isJumping) {
             this.isCrouching = true;
@@ -108,8 +118,6 @@ class Player {
 
     stopCrouch() {
         this.isCrouching = false;
-        // Adjust position so dino doesn't sink into ground when standing up
-        this.y -= (this.h - this.crouchH);
     }
     
     getHitbox() {
@@ -174,13 +182,12 @@ class Pterodactyl extends Obstacle {
 
     draw() {
         ctx.fillStyle = '#535353';
-        ctx.fillRect(this.x, this.y + 10, this.w, 10); // Body
-        ctx.fillRect(this.x + this.w, this.y + 5, 15, 10); // Head
-
+        ctx.fillRect(this.x, this.y + 10, this.w, 10);
+        ctx.fillRect(this.x + this.w, this.y + 5, 15, 10);
         if (this.wingToggle) {
-            ctx.fillRect(this.x + 10, this.y, 30, 10); // Wings up
+            ctx.fillRect(this.x + 10, this.y, 30, 10);
         } else {
-            ctx.fillRect(this.x + 10, this.y + 20, 30, 10); // Wings down
+            ctx.fillRect(this.x + 10, this.y + 20, 30, 10);
         }
     }
 
@@ -192,7 +199,17 @@ class Pterodactyl extends Obstacle {
     }
 }
 
-// --- Cloud Class ---
+class Stone extends Obstacle {
+    constructor(x, y) {
+        super(x, y - 20, 20, 20);
+    }
+    
+    draw() {
+        ctx.fillStyle = '#535353';
+        ctx.fillRect(this.x, this.y, this.w, this.h);
+    }
+}
+
 class Cloud {
     constructor(x, y, size) {
         this.x = x;
@@ -215,42 +232,140 @@ class Cloud {
     }
 }
 
-// --- Game Functions ---
-function init() {
+// --- Bot AI ---
+function findNextObstacle() {
+    return obstacles.find(obs => obs.x + obs.w > player.x);
+}
+
+// --- !! REPLACED FUNCTION !! ---
+function updateBot() {
+    const nextObstacle = findNextObstacle();
+
+    if (!nextObstacle) {
+        if (player.isCrouching) player.stopCrouch();
+        return;
+    }
+
+    // --- 1. Decision Making: Analyze the obstacle and decide the best action ---
+
+    let mustCrouch = false;
+    let shouldJump = false; // Simplified from high/low to just "jump"
+    let reactionDistance;
+
+    if (nextObstacle instanceof Pterodactyl) {
+        // It's a low Pterodactyl that requires crouching
+        if (nextObstacle.y >= GROUND_Y - 80) {
+            mustCrouch = true;
+            reactionDistance = gameSpeed * 20 + (nextObstacle.w / 2);
+        }
+        // High Pterodactyls are ignored, no action needed.
+    } else if (nextObstacle instanceof Cactus && (nextObstacle.type === 'large' || nextObstacle.type === 'group')) {
+        // BIG OBSTACLE: Plan to jump LATE
+        shouldJump = true;
+        // Jump later (closer to the obstacle) for large ones.
+        reactionDistance = gameSpeed * 18.5 + (nextObstacle.w / 2);
+    } else if (nextObstacle instanceof Cactus || nextObstacle instanceof Stone) {
+        // SMALL OBSTACLE (Small Cactus or Stone): Plan to jump EARLIER
+        shouldJump = true;
+        // Jump a bit earlier for smaller obstacles to be safe.
+        reactionDistance = gameSpeed * 21 + (nextObstacle.w / 2);
+    }
+
+    // --- 2. State Correction: Ensure the bot isn't stuck in the wrong state ---
+    if (player.isCrouching && !mustCrouch) {
+        player.stopCrouch();
+    }
+
+    // --- 3. Action Execution: Perform the decided action if close enough ---
+    const distance = nextObstacle.x - player.x;
+
+    if (reactionDistance && distance <= reactionDistance && distance > 0) {
+        if (mustCrouch) {
+            player.crouch();
+        } else if (shouldJump) {
+            // ALWAYS perform a full jump to guarantee clearance.
+            // We are no longer calling player.cutJump() for the bot.
+            player.jump();
+        }
+    }
+}
+
+
+// --- Game Flow & Drawing ---
+function drawInitialScreen() {
+    ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    player.draw();
+    ctx.fillStyle = '#535353';
+    ctx.font = '20px "Courier New", Courier, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press UP or Tap to Start', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 20);
+}
+
+function drawCountdown() {
+    ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    player.draw();
+    obstacles.forEach(obs => obs.draw());
+    clouds.forEach(c => c.draw());
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    ctx.fillStyle = 'white';
+    ctx.font = '40px "Courier New", Courier, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Demo starting in ${countdownValue}...`, GAME_WIDTH / 2, GAME_HEIGHT / 2);
+}
+
+function resetGame() {
     player = new Player(50, GROUND_Y - DINO_HEIGHT, DINO_WIDTH, DINO_HEIGHT, DINO_CROUCH_WIDTH, DINO_CROUCH_HEIGHT);
     gameSpeed = INITIAL_GAME_SPEED;
     score = 0;
     highScore = localStorage.getItem('dinoHighScore') || 0;
+    scoreEl.textContent = 0;
     highScoreEl.textContent = highScore;
-    isGameOver = false;
     obstacles = [];
     clouds = [];
     frameCount = 0;
-    
-    for(let i = 0; i < 3; i++) { spawnCloud(); }
-
+    for(let i = 0; i < 3; i++) spawnCloud();
     gameOverContainer.classList.add('hidden');
-    obstacleSpawnTimer = getRandomInt(80, 150);
-    gameLoop();
 }
 
-let obstacleSpawnTimer = 0;
-let cloudSpawnTimer = 0;
+function init() {
+    resetGame();
+    gameState = 'waiting';
+    drawInitialScreen();
+    clearTimeout(demoTimeout);
+    demoTimeout = setTimeout(() => {
+        gameState = 'countingDown';
+        countdownValue = 5;
+        drawCountdown();
+        countdownInterval = setInterval(() => {
+            countdownValue--;
+            if (countdownValue <= 0) {
+                clearInterval(countdownInterval);
+                startGame('demo');
+            } else {
+                drawCountdown();
+            }
+        }, 1000);
+    }, IDLE_TIMEOUT_DURATION);
+}
 
-function gameLoop() {
-    if (isGameOver) {
-        showGameOver();
-        return;
-    }
+function startGame(mode) {
+    clearTimeout(demoTimeout);
+    clearInterval(countdownInterval);
+    if (gameState === 'playing' || gameState === 'demo') return;
+    
+    resetGame(); // Reset score and obstacles when starting
+    gameState = mode;
+}
 
+function runGameFrame() {
     frameCount++;
     gameSpeed += GAME_SPEED_INCREMENT;
     score++;
     scoreEl.textContent = Math.floor(score / 10);
-
+    
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-    // Clouds
+    
     cloudSpawnTimer--;
     if (cloudSpawnTimer <= 0) {
         spawnCloud();
@@ -259,10 +374,8 @@ function gameLoop() {
     clouds = clouds.filter(c => c.x + c.size * 3 > 0);
     clouds.forEach(cloud => cloud.update());
     
-    // Player
     player.update();
-
-    // Obstacles
+    
     obstacleSpawnTimer--;
     if (obstacleSpawnTimer <= 0) {
         spawnObstacle();
@@ -272,35 +385,58 @@ function gameLoop() {
     obstacles.forEach(obs => {
         obs.update();
         if (checkCollision(player.getHitbox(), obs.getHitbox())) {
-            isGameOver = true;
+            gameState = 'gameOver';
         }
     });
-
-    requestAnimationFrame(gameLoop);
 }
 
+function update() {
+    requestAnimationFrame(update);
+    switch (gameState) {
+        case 'playing':
+            runGameFrame();
+            break;
+        case 'demo':
+            updateBot();
+            runGameFrame();
+            break;
+        case 'gameOver':
+            showGameOver();
+            break;
+    }
+}
+
+// --- Spawning Logic ---
+let obstacleSpawnTimer = 0;
+let cloudSpawnTimer = 0;
+
 function spawnObstacle() {
-    const obstacleType = Math.random();
-    if (obstacleType < 0.7 && !player.isCrouching) { // Cactuses can't spawn if you're holding crouch
+    const type = Math.random();
+    if (type < 0.2 && obstacles.length === 0) { 
+        spawnStoneFormation();
+        obstacleSpawnTimer = getRandomInt(100, 180) / (gameSpeed / INITIAL_GAME_SPEED);
+    } else if (type < 0.7) { 
         const cactusType = ['small', 'large', 'group'][getRandomInt(0, 2)];
         obstacles.push(new Cactus(GAME_WIDTH, GROUND_Y, cactusType));
     } else {
-        // Low flying Pterodactyl that requires crouching.
-        // It spawns at a height of 50px from the ground.
-        // The standing dino is 60px tall and will collide.
-        // The crouching dino is 30px tall and will pass under.
-        const pteroY = GROUND_Y - 50; 
+        const pteroY = Math.random() < 0.5 ? GROUND_Y - 70 : GROUND_Y - 100;
         obstacles.push(new Pterodactyl(GAME_WIDTH, pteroY));
     }
 }
 
-function spawnCloud() {
-    const x = GAME_WIDTH + 50;
-    const y = getRandomInt(30, 100);
-    const size = getRandomInt(15, 30);
-    clouds.push(new Cloud(x, y, size));
+function spawnStoneFormation() {
+    const stoneCount = getRandomInt(2, 4);
+    const spacing = getRandomInt(100, 150);
+    for (let i = 0; i < stoneCount; i++) {
+        obstacles.push(new Stone(GAME_WIDTH + i * spacing, GROUND_Y));
+    }
 }
 
+function spawnCloud() {
+    clouds.push(new Cloud(GAME_WIDTH + 50, getRandomInt(30, 100), getRandomInt(15, 30)));
+}
+
+// --- Utility & Event Listeners ---
 function checkCollision(box1, box2) {
     return (
         box1.x < box2.x + box2.w &&
@@ -310,7 +446,9 @@ function checkCollision(box1, box2) {
     );
 }
 
+let gameOverRendered = false;
 function showGameOver() {
+    if (gameOverRendered) return;
     const finalScore = Math.floor(score / 10);
     if (finalScore > highScore) {
         highScore = finalScore;
@@ -318,34 +456,50 @@ function showGameOver() {
         highScoreEl.textContent = highScore;
     }
     gameOverContainer.classList.remove('hidden');
+    gameOverRendered = true;
 }
 
 function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// --- Event Listeners ---
+function handleStartInput(isJump) {
+    if (gameState === 'waiting' || gameState === 'countingDown') {
+        startGame('playing');
+        if (isJump) player.jump();
+    } else if (gameState === 'gameOver') {
+        init();
+        gameOverRendered = false;
+    }
+}
+
 document.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
     if (e.code === 'Space' || e.code === 'ArrowUp') {
-        if (isGameOver) {
-            init();
-        } else {
-            player.jump();
-        }
-    } else if (e.code === 'ArrowDown') {
-        if (!isGameOver) {
-            player.crouch();
-        }
+        handleStartInput(true);
+        if (gameState === 'playing') player.jump();
+    } else if (e.code === 'ArrowDown' && gameState === 'playing') {
+        player.crouch();
     }
 });
 
 document.addEventListener('keyup', (e) => {
-    if (e.code === 'ArrowDown') {
-        if (!isGameOver) {
-            player.stopCrouch();
-        }
+    if ((e.code === 'Space' || e.code === 'ArrowUp') && gameState === 'playing') {
+        player.cutJump();
+    } else if (e.code === 'ArrowDown' && gameState === 'playing') {
+        player.stopCrouch();
     }
 });
 
-// Start the game
+canvas.addEventListener('mousedown', () => {
+    handleStartInput(true);
+    if (gameState === 'playing') player.jump();
+});
+
+canvas.addEventListener('mouseup', () => {
+    if (gameState === 'playing') player.cutJump();
+});
+
+// --- Start ---
 init();
+update();
