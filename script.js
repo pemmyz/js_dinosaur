@@ -3,7 +3,6 @@ const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const highScoreEl = document.getElementById('high-score');
 const gameOverContainer = document.getElementById('game-over-container');
-// --- New element references ---
 const helpMenu = document.getElementById('help-menu');
 const botToggleBtn = document.getElementById('bot-toggle-btn');
 const closeHelpBtn = document.getElementById('close-help-btn');
@@ -32,53 +31,29 @@ canvas.width = GAME_WIDTH;
 canvas.height = GAME_HEIGHT;
 ctx.imageSmoothingEnabled = false;
 
-// --- NEW: Web Audio API Sound Generation ---
+// --- Web Audio API Sound Generation ---
 let audioCtx;
-// Initialize the AudioContext on the first user interaction to comply with browser policies
 function initAudio() {
     if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
 }
-
-// Generic function to create and play a sound
-function playSound(duration, frequency, volume, type, callback) {
+function playSound(duration, frequency, volume, type) {
     if (!audioCtx) return;
     const oscillator = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
-
     oscillator.connect(gainNode);
     gainNode.connect(audioCtx.destination);
-
     oscillator.type = type;
     oscillator.frequency.value = frequency;
-
-    // Fade out envelope
     gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
     gainNode.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-
     oscillator.start(audioCtx.currentTime);
     oscillator.stop(audioCtx.currentTime + duration);
-
-    if (callback) {
-        setTimeout(callback, duration * 1000);
-    }
 }
-
-function playJumpSound() {
-    // Short, high-pitched sine wave for jumping
-    playSound(0.15, 880, 0.2, 'sine');
-}
-
-function playDieSound() {
-    // Short, buzzy square wave for taking damage
-    playSound(0.3, 120, 0.3, 'square');
-}
-
-function playScoreSound() {
-    // Very short, higher-pitched sine wave for score milestones
-    playSound(0.1, 1200, 0.2, 'sine');
-}
+function playJumpSound() { playSound(0.15, 880, 0.2, 'sine'); }
+function playDieSound() { playSound(0.3, 120, 0.3, 'square'); }
+function playScoreSound() { playSound(0.1, 1200, 0.2, 'sine'); }
 
 
 // --- Game State ---
@@ -86,7 +61,6 @@ let player, gameSpeed, score, highScore, obstacles, clouds, frameCount, groundFe
 let gameState = 'waiting'; // 'waiting', 'countingDown', 'playing', 'demo', 'gameOver', 'help'
 let demoTimeout, countdownInterval, countdownValue;
 let isBotEnabled = false;
-// --- NEW: Obstacle spawning state ---
 let normalObstacleCount, stoneSpawnThreshold;
 
 // --- Player (Dino) Object ---
@@ -119,7 +93,7 @@ class Player {
     }
     jump() {
         if (!this.isJumping && !this.isCrouching) {
-            playJumpSound(); // MODIFIED
+            playJumpSound();
             this.isJumping = true; this.velocityY = -DINO_JUMP_POWER;
         }
     }
@@ -132,7 +106,7 @@ class Player {
     }
 }
 
-// --- Obstacle & Scenery Classes (Unchanged) ---
+// --- Obstacle & Scenery Classes ---
 class Obstacle {
     constructor(x, y, w, h) { this.x = x; this.y = y; this.w = w; this.h = h; }
     update() { this.x -= gameSpeed; this.draw(); }
@@ -168,7 +142,7 @@ class Cloud {
     update() { this.x -= gameSpeed * 0.5; this.draw(); }
 }
 
-// --- Dynamic Ground (Unchanged) ---
+// --- Dynamic Ground ---
 let lastGroundFeatureX = 0;
 function spawnGroundFeature(xPos) {
     const type = Math.random(); const yOffset = Math.random() * 6;
@@ -186,18 +160,76 @@ function updateAndDrawGround() {
 }
 
 
-// --- Bot AI (Unchanged) ---
-function findNextObstacle() { return obstacles.find(obs => obs.x + obs.w > player.x); }
+// --- MODIFIED: Bot AI ---
 function updateBot() {
-    const nextObstacle = findNextObstacle(); if (!nextObstacle) { if (player.isCrouching) player.stopCrouch(); return; }
-    let mustCrouch = false, shouldJump = false, reactionDistance;
-    if (nextObstacle instanceof Pterodactyl) { if (nextObstacle.y >= GROUND_Y - 80) { mustCrouch = true; reactionDistance = gameSpeed * 20 + (nextObstacle.w/2); } }
-    else if (nextObstacle instanceof Cactus && (nextObstacle.type === 'large' || nextObstacle.type === 'group')) { shouldJump = true; reactionDistance = gameSpeed * 18.5 + (nextObstacle.w/2); }
-    else if (nextObstacle instanceof Cactus || nextObstacle instanceof Stone) { shouldJump = true; reactionDistance = gameSpeed * 21 + (nextObstacle.w/2); }
-    if (player.isCrouching && !mustCrouch) player.stopCrouch();
-    const distance = nextObstacle.x - player.x;
-    if (reactionDistance && distance <= reactionDistance && distance > 0) { if (mustCrouch) player.crouch(); else if (shouldJump) player.jump(); }
+    // Don't make a new decision while in the air. This is key for stone hopping.
+    if (player.isJumping) {
+        return;
+    }
+
+    const nextObstacles = obstacles.filter(obs => obs.x + obs.w > player.x);
+    if (nextObstacles.length === 0) {
+        if (player.isCrouching) player.stopCrouch();
+        return;
+    }
+    const nextObstacle = nextObstacles[0];
+
+    // Priority 1: Stone Hopping
+    if (nextObstacle instanceof Stone) {
+        const reactionDistance = gameSpeed * 15;
+        const distance = nextObstacle.x - (player.x + player.w);
+
+        if (distance <= reactionDistance && distance > 0) {
+            player.jump();
+            setTimeout(() => {
+                if (player.velocityY < 0) player.cutJump();
+            }, 180);
+        }
+        return; // Handle stone and exit
+    }
+
+    let mustCrouch = false;
+    let shouldJump = false;
+    let reactionDistance;
+
+    // Priority 2: Pterodactyl Logic
+    if (nextObstacle instanceof Pterodactyl) {
+        // This is a "low-flying" Pterodactyl. The dino must crouch to get under it.
+        // The spawn height is GROUND_Y - 70, this condition correctly identifies it.
+        if (nextObstacle.y >= GROUND_Y - 80) {
+            mustCrouch = true;
+            reactionDistance = gameSpeed * 20;
+        }
+        // Otherwise, it's a "high-flying" Pterodactyl.
+        // The bot will do NOTHING, allowing the dino to run safely underneath.
+        // `shouldJump` remains false.
+
+    // Priority 3: Cactus Logic
+    } else if (nextObstacle instanceof Cactus) {
+        // All cacti must be jumped over.
+        shouldJump = true;
+        // Adjust reaction distance based on obstacle size
+        reactionDistance = (nextObstacle.type === 'large' || nextObstacle.type === 'group') 
+            ? gameSpeed * 18.5 + (nextObstacle.w / 2) 
+            : gameSpeed * 21 + (nextObstacle.w / 2);
+    }
+
+    // --- Execute Action ---
+    // Make sure we should not be crouching before attempting to stop.
+    if (player.isCrouching && !mustCrouch) {
+        player.stopCrouch();
+    }
+    
+    // If an action was decided, and the obstacle is close enough, perform it.
+    if (reactionDistance && nextObstacle.x - player.x <= reactionDistance && nextObstacle.x - player.x > 0) {
+        if (mustCrouch) {
+            player.crouch();
+        } else if (shouldJump) {
+            player.jump();
+        }
+    }
 }
+
 
 // --- Game Flow & Drawing ---
 function drawInitialScreen() {
@@ -231,7 +263,6 @@ function resetGame() {
     }
     gameOverContainer.classList.add('hidden');
     helpMenu.classList.add('hidden');
-    // MODIFIED: Initialize new spawning counters
     normalObstacleCount = 0;
     stoneSpawnThreshold = getRandomInt(10, 15);
 }
@@ -270,7 +301,7 @@ function runGameFrame() {
     const displayedScore = Math.floor(score / 10);
     scoreEl.textContent = displayedScore;
     if (displayedScore > 0 && displayedScore % 100 === 0 && score % 10 === 0) {
-        playScoreSound(); // MODIFIED
+        playScoreSound();
     }
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     updateAndDrawGround();
@@ -279,7 +310,6 @@ function runGameFrame() {
     player.update();
     obstacleSpawnTimer--; if (obstacleSpawnTimer <= 0) {
         spawnObstacle(); 
-        // Reset timer based on standard obstacle spacing
         obstacleSpawnTimer = getRandomInt(60, 140) / (gameSpeed / INITIAL_GAME_SPEED);
     }
     obstacles = obstacles.filter(obs => obs.x + obs.w > 0);
@@ -300,33 +330,27 @@ function update() {
 // --- Spawning Logic ---
 let obstacleSpawnTimer = 0; let cloudSpawnTimer = 0;
 
-// --- MODIFIED: Spawning Logic ---
 function spawnObstacle() {
-    // Check if it's time to spawn a stone formation (after 10-15 normal obstacles)
-    if (normalObstacleCount >= stoneSpawnThreshold && obstacles.length === 0) {
+    if (obstacles.length === 0 && normalObstacleCount >= stoneSpawnThreshold) {
         spawnStoneFormation();
-        // Reset counters for the next wave
         normalObstacleCount = 0;
         stoneSpawnThreshold = getRandomInt(10, 15);
-        // Set a slightly longer timer after a stone formation to give player a break
         obstacleSpawnTimer = getRandomInt(100, 180) / (gameSpeed / INITIAL_GAME_SPEED);
-    } else {
-        // Spawn a regular obstacle (Cactus or Pterodactyl)
+    } else if (obstacles.length === 0) {
         const type = Math.random();
-        if (type < 0.7) { // 70% chance for a cactus
+        if (type < 0.7) { 
             const cactusType = ['small', 'large', 'group'][getRandomInt(0, 2)]; 
             obstacles.push(new Cactus(GAME_WIDTH, GROUND_Y, cactusType));
-        } else { // 30% chance for a pterodactyl
+        } else { 
             const pteroY = Math.random() < 0.5 ? GROUND_Y - 70 : GROUND_Y - 100; 
             obstacles.push(new Pterodactyl(GAME_WIDTH, pteroY)); 
         }
-        // Increment the counter for normal obstacles
         normalObstacleCount++;
     }
 }
 
 function spawnStoneFormation() {
-    const stoneCount = getRandomInt(2, 4); 
+    const stoneCount = getRandomInt(3, 5); 
     const spacing = getRandomInt(100, 150);
     for (let i = 0; i < stoneCount; i++) {
         obstacles.push(new Stone(GAME_WIDTH + i * spacing, GROUND_Y));
@@ -339,16 +363,15 @@ function checkCollision(box1, box2) { return (box1.x < box2.x + box2.w && box1.x
 let gameOverRendered = false;
 function showGameOver() {
     if (gameOverRendered) return;
-    playDieSound(); // MODIFIED
+    playDieSound();
     const finalScore = Math.floor(score / 10);
     if (finalScore > highScore) { highScore = finalScore; localStorage.setItem('dinoHighScore', highScore); highScoreEl.textContent = highScore; }
     gameOverContainer.classList.remove('hidden'); gameOverRendered = true;
 }
 function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 
-// MODIFIED: handleStartInput now also initializes the audio context
 function handleStartInput(isJump) {
-    initAudio(); // Initialize audio on first user interaction
+    initAudio(); 
     if (gameState === 'waiting' || gameState === 'countingDown') {
         startGame(); 
         if (isJump && gameState === 'playing') player.jump();
@@ -374,7 +397,7 @@ document.addEventListener('keyup', (e) => {
 canvas.addEventListener('mousedown', () => { handleStartInput(true); if (gameState === 'playing') player.jump(); });
 canvas.addEventListener('mouseup', () => { if (gameState === 'playing') player.cutJump(); });
 
-// --- New listeners for menu buttons ---
+// --- Menu Button Listeners ---
 botToggleBtn.addEventListener('click', () => {
     isBotEnabled = !isBotEnabled;
     botToggleBtn.textContent = isBotEnabled ? 'Bot Mode: ON' : 'Bot Mode: OFF';
