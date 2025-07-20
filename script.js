@@ -32,18 +32,62 @@ canvas.width = GAME_WIDTH;
 canvas.height = GAME_HEIGHT;
 ctx.imageSmoothingEnabled = false;
 
-// --- Sound Effects ---
-const jumpSound = new Audio('sounds/jump.wav');
-const dieSound = new Audio('sounds/die.wav');
-const scoreSound = new Audio('sounds/score.wav');
+// --- NEW: Web Audio API Sound Generation ---
+let audioCtx;
+// Initialize the AudioContext on the first user interaction to comply with browser policies
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+}
+
+// Generic function to create and play a sound
+function playSound(duration, frequency, volume, type, callback) {
+    if (!audioCtx) return;
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    oscillator.type = type;
+    oscillator.frequency.value = frequency;
+
+    // Fade out envelope
+    gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+
+    oscillator.start(audioCtx.currentTime);
+    oscillator.stop(audioCtx.currentTime + duration);
+
+    if (callback) {
+        setTimeout(callback, duration * 1000);
+    }
+}
+
+function playJumpSound() {
+    // Short, high-pitched sine wave for jumping
+    playSound(0.15, 880, 0.2, 'sine');
+}
+
+function playDieSound() {
+    // Short, buzzy square wave for taking damage
+    playSound(0.3, 120, 0.3, 'square');
+}
+
+function playScoreSound() {
+    // Very short, higher-pitched sine wave for score milestones
+    playSound(0.1, 1200, 0.2, 'sine');
+}
+
 
 // --- Game State ---
 let player, gameSpeed, score, highScore, obstacles, clouds, frameCount, groundFeatures;
-// Add 'help' state
 let gameState = 'waiting'; // 'waiting', 'countingDown', 'playing', 'demo', 'gameOver', 'help'
 let demoTimeout, countdownInterval, countdownValue;
-// --- New bot state variable ---
 let isBotEnabled = false;
+// --- NEW: Obstacle spawning state ---
+let normalObstacleCount, stoneSpawnThreshold;
 
 // --- Player (Dino) Object ---
 class Player {
@@ -75,7 +119,7 @@ class Player {
     }
     jump() {
         if (!this.isJumping && !this.isCrouching) {
-            jumpSound.play().catch(e => console.error("Error playing jump sound:", e));
+            playJumpSound(); // MODIFIED
             this.isJumping = true; this.velocityY = -DINO_JUMP_POWER;
         }
     }
@@ -164,7 +208,6 @@ function drawInitialScreen() {
     ctx.font = '20px "Courier New", Courier, monospace';
     ctx.textAlign = 'center';
     ctx.fillText('Press UP or Tap to Start', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 20);
-    // New instruction for help menu
     ctx.font = '16px "Courier New", Courier, monospace';
     ctx.fillText("Press 'H' for Help/Options", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 10);
 }
@@ -188,6 +231,9 @@ function resetGame() {
     }
     gameOverContainer.classList.add('hidden');
     helpMenu.classList.add('hidden');
+    // MODIFIED: Initialize new spawning counters
+    normalObstacleCount = 0;
+    stoneSpawnThreshold = getRandomInt(10, 15);
 }
 function returnToWaitingScreen() {
     clearTimeout(demoTimeout);
@@ -195,7 +241,6 @@ function returnToWaitingScreen() {
     gameState = 'waiting';
     helpMenu.classList.add('hidden');
     drawInitialScreen();
-    // Restart the idle timer for the demo
     demoTimeout = setTimeout(() => {
         if (gameState !== 'waiting') return;
         gameState = 'countingDown';
@@ -212,13 +257,11 @@ function init() {
     resetGame();
     returnToWaitingScreen();
 }
-// Modified startGame to use the bot flag
 function startGame() {
     clearTimeout(demoTimeout);
     clearInterval(countdownInterval);
     if (gameState === 'playing' || gameState === 'demo') return;
     resetGame();
-    // Choose mode based on the bot toggle
     const mode = isBotEnabled ? 'demo' : 'playing';
     gameState = mode;
 }
@@ -226,14 +269,18 @@ function runGameFrame() {
     frameCount++; gameSpeed += GAME_SPEED_INCREMENT; score++;
     const displayedScore = Math.floor(score / 10);
     scoreEl.textContent = displayedScore;
-    if (displayedScore > 0 && displayedScore % 100 === 0 && score % 10 === 0) { scoreSound.play().catch(e => console.error("Error playing score sound:", e)); }
+    if (displayedScore > 0 && displayedScore % 100 === 0 && score % 10 === 0) {
+        playScoreSound(); // MODIFIED
+    }
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     updateAndDrawGround();
     cloudSpawnTimer--; if (cloudSpawnTimer <= 0) { spawnCloud(); cloudSpawnTimer = getRandomInt(200, 400); }
     clouds = clouds.filter(c => c.x + c.size * 3 > 0); clouds.forEach(cloud => cloud.update());
     player.update();
     obstacleSpawnTimer--; if (obstacleSpawnTimer <= 0) {
-        spawnObstacle(); obstacleSpawnTimer = getRandomInt(60, 140) / (gameSpeed / INITIAL_GAME_SPEED);
+        spawnObstacle(); 
+        // Reset timer based on standard obstacle spacing
+        obstacleSpawnTimer = getRandomInt(60, 140) / (gameSpeed / INITIAL_GAME_SPEED);
     }
     obstacles = obstacles.filter(obs => obs.x + obs.w > 0);
     obstacles.forEach(obs => {
@@ -247,21 +294,43 @@ function update() {
         case 'playing': runGameFrame(); break;
         case 'demo': updateBot(); runGameFrame(); break;
         case 'gameOver': showGameOver(); break;
-        // The 'waiting', 'countingDown', and 'help' states are handled by events, not the game loop.
     }
 }
 
-// --- Spawning Logic (Unchanged) ---
+// --- Spawning Logic ---
 let obstacleSpawnTimer = 0; let cloudSpawnTimer = 0;
+
+// --- MODIFIED: Spawning Logic ---
 function spawnObstacle() {
-    const type = Math.random();
-    if (type < 0.2 && obstacles.length === 0) { spawnStoneFormation(); obstacleSpawnTimer = getRandomInt(100, 180) / (gameSpeed / INITIAL_GAME_SPEED); }
-    else if (type < 0.7) { const cactusType = ['small', 'large', 'group'][getRandomInt(0, 2)]; obstacles.push(new Cactus(GAME_WIDTH, GROUND_Y, cactusType)); }
-    else { const pteroY = Math.random() < 0.5 ? GROUND_Y - 70 : GROUND_Y - 100; obstacles.push(new Pterodactyl(GAME_WIDTH, pteroY)); }
+    // Check if it's time to spawn a stone formation (after 10-15 normal obstacles)
+    if (normalObstacleCount >= stoneSpawnThreshold && obstacles.length === 0) {
+        spawnStoneFormation();
+        // Reset counters for the next wave
+        normalObstacleCount = 0;
+        stoneSpawnThreshold = getRandomInt(10, 15);
+        // Set a slightly longer timer after a stone formation to give player a break
+        obstacleSpawnTimer = getRandomInt(100, 180) / (gameSpeed / INITIAL_GAME_SPEED);
+    } else {
+        // Spawn a regular obstacle (Cactus or Pterodactyl)
+        const type = Math.random();
+        if (type < 0.7) { // 70% chance for a cactus
+            const cactusType = ['small', 'large', 'group'][getRandomInt(0, 2)]; 
+            obstacles.push(new Cactus(GAME_WIDTH, GROUND_Y, cactusType));
+        } else { // 30% chance for a pterodactyl
+            const pteroY = Math.random() < 0.5 ? GROUND_Y - 70 : GROUND_Y - 100; 
+            obstacles.push(new Pterodactyl(GAME_WIDTH, pteroY)); 
+        }
+        // Increment the counter for normal obstacles
+        normalObstacleCount++;
+    }
 }
+
 function spawnStoneFormation() {
-    const stoneCount = getRandomInt(2, 4); const spacing = getRandomInt(100, 150);
-    for (let i = 0; i < stoneCount; i++) obstacles.push(new Stone(GAME_WIDTH + i * spacing, GROUND_Y));
+    const stoneCount = getRandomInt(2, 4); 
+    const spacing = getRandomInt(100, 150);
+    for (let i = 0; i < stoneCount; i++) {
+        obstacles.push(new Stone(GAME_WIDTH + i * spacing, GROUND_Y));
+    }
 }
 function spawnCloud() { clouds.push(new Cloud(GAME_WIDTH + 50, getRandomInt(30, 100), getRandomInt(15, 30))); }
 
@@ -270,16 +339,18 @@ function checkCollision(box1, box2) { return (box1.x < box2.x + box2.w && box1.x
 let gameOverRendered = false;
 function showGameOver() {
     if (gameOverRendered) return;
-    dieSound.play().catch(e => console.error("Error playing die sound:", e));
+    playDieSound(); // MODIFIED
     const finalScore = Math.floor(score / 10);
     if (finalScore > highScore) { highScore = finalScore; localStorage.setItem('dinoHighScore', highScore); highScoreEl.textContent = highScore; }
     gameOverContainer.classList.remove('hidden'); gameOverRendered = true;
 }
 function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
-// Modified handleStartInput
+
+// MODIFIED: handleStartInput now also initializes the audio context
 function handleStartInput(isJump) {
+    initAudio(); // Initialize audio on first user interaction
     if (gameState === 'waiting' || gameState === 'countingDown') {
-        startGame(); // This now handles bot mode automatically
+        startGame(); 
         if (isJump && gameState === 'playing') player.jump();
     } else if (gameState === 'gameOver') {
         init();
@@ -290,11 +361,10 @@ document.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     if (e.code === 'Space' || e.code === 'ArrowUp') { handleStartInput(true); if (gameState === 'playing') player.jump(); }
     else if (e.code === 'ArrowDown' && gameState === 'playing') { player.crouch(); }
-    // --- New key listener for help menu ---
     else if (e.code === 'KeyH' && gameState === 'waiting') {
         gameState = 'help';
         helpMenu.classList.remove('hidden');
-        clearTimeout(demoTimeout); // Stop demo from starting
+        clearTimeout(demoTimeout);
     }
 });
 document.addEventListener('keyup', (e) => {
@@ -308,7 +378,6 @@ canvas.addEventListener('mouseup', () => { if (gameState === 'playing') player.c
 botToggleBtn.addEventListener('click', () => {
     isBotEnabled = !isBotEnabled;
     botToggleBtn.textContent = isBotEnabled ? 'Bot Mode: ON' : 'Bot Mode: OFF';
-    // Add visual feedback if you want, e.g., changing color
     botToggleBtn.style.borderColor = isBotEnabled ? '#3c8e40' : '#535353';
     botToggleBtn.style.color = isBotEnabled ? '#3c8e40' : '#535353';
 });
