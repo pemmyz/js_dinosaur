@@ -7,7 +7,7 @@ const gameOverContainer = document.getElementById('game-over-container');
 // --- Game Constants ---
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 250;
-const GROUND_Y = GAME_HEIGHT - 30;
+const GROUND_Y = GAME_HEIGHT - 30; // The top line of the ground
 
 // Player constants
 const DINO_WIDTH = 40;
@@ -16,18 +16,28 @@ const DINO_CROUCH_WIDTH = 60;
 const DINO_CROUCH_HEIGHT = 30;
 const DINO_JUMP_POWER = 12;
 const GRAVITY = 0.6;
-const JUMP_CUTOFF_VELOCITY = -4; // Velocity when jump key is released early
+const JUMP_CUTOFF_VELOCITY = -4;
 
 // Game speed
 const INITIAL_GAME_SPEED = 5;
 const GAME_SPEED_INCREMENT = 0.001;
-const IDLE_TIMEOUT_DURATION = 5000; // 5 seconds
+const IDLE_TIMEOUT_DURATION = 5000;
 
 canvas.width = GAME_WIDTH;
 canvas.height = GAME_HEIGHT;
 
+// For a crisp pixel-art look
+ctx.imageSmoothingEnabled = false;
+
+// --- Sound Effects ---
+// Create a 'sounds' folder and place your .wav files there.
+// You can find free sound effects on sites like freesound.org
+const jumpSound = new Audio('sounds/jump.wav');
+const dieSound = new Audio('sounds/die.wav');
+const scoreSound = new Audio('sounds/score.wav');
+
 // --- Game State ---
-let player, gameSpeed, score, highScore, obstacles, clouds, frameCount;
+let player, gameSpeed, score, highScore, obstacles, clouds, frameCount, groundFeatures;
 let gameState = 'waiting'; // 'waiting', 'countingDown', 'playing', 'demo', 'gameOver'
 let demoTimeout, countdownInterval, countdownValue;
 
@@ -52,18 +62,12 @@ class Player {
         const hitbox = this.getHitbox();
 
         if (this.isCrouching) {
-            // Crouched Body
             ctx.fillRect(hitbox.x, hitbox.y, hitbox.w, hitbox.h);
-            // Crouched Head
             ctx.fillRect(hitbox.x + hitbox.w - 15, hitbox.y + 5, 20, 15);
         } else {
-            // Standing Body
             ctx.fillRect(hitbox.x, hitbox.y, hitbox.w, hitbox.h - 10);
-            // Standing Head
             ctx.fillRect(hitbox.x + hitbox.w * 0.7, hitbox.y - 10, hitbox.w * 0.6, hitbox.w * 0.4);
-            // Arm
             ctx.fillRect(hitbox.x + hitbox.w * 0.6, hitbox.y + 20, 10, 5);
-            // Legs
             if (this.isJumping) {
                 ctx.fillRect(hitbox.x + 10, hitbox.y + hitbox.h - 10, 8, 10);
                 ctx.fillRect(hitbox.x + hitbox.w - 20, hitbox.y + hitbox.h - 10, 8, 10);
@@ -81,24 +85,20 @@ class Player {
         if (!this.isJumping && !this.isCrouching && frameCount % 10 === 0) {
             this.legToggle = !this.legToggle;
         }
-
-        // Apply gravity
         this.velocityY += GRAVITY;
         this.y += this.velocityY;
-
-        // Ground check
         const groundPos = GROUND_Y - (this.isCrouching ? this.crouchH : this.h);
         if (this.y > groundPos) {
             this.y = groundPos;
             this.velocityY = 0;
             this.isJumping = false;
         }
-        
         this.draw();
     }
 
     jump() {
         if (!this.isJumping && !this.isCrouching) {
+            jumpSound.play().catch(e => console.error("Error playing jump sound:", e));
             this.isJumping = true;
             this.velocityY = -DINO_JUMP_POWER;
         }
@@ -111,9 +111,7 @@ class Player {
     }
 
     crouch() {
-        if (!this.isJumping) {
-            this.isCrouching = true;
-        }
+        if (!this.isJumping) this.isCrouching = true;
     }
 
     stopCrouch() {
@@ -121,43 +119,23 @@ class Player {
     }
     
     getHitbox() {
-        if (this.isCrouching) {
-            return { x: this.x, y: this.y, w: this.crouchW, h: this.crouchH };
-        }
+        if (this.isCrouching) return { x: this.x, y: this.y, w: this.crouchW, h: this.crouchH };
         return { x: this.x, y: this.y, w: this.w, h: this.h };
     }
 }
 
-// --- Obstacle Classes ---
+// --- Obstacle & Scenery Classes ---
 class Obstacle {
-    constructor(x, y, w, h) {
-        this.x = x;
-        this.y = y;
-        this.w = w;
-        this.h = h;
-    }
-
-    update() {
-        this.x -= gameSpeed;
-        this.draw();
-    }
-    
-    getHitbox() {
-        return { x: this.x, y: this.y, w: this.w, h: this.h };
-    }
+    constructor(x, y, w, h) { this.x = x; this.y = y; this.w = w; this.h = h; }
+    update() { this.x -= gameSpeed; this.draw(); }
+    getHitbox() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
 }
-
 class Cactus extends Obstacle {
     constructor(x, y, type) {
-        const sizes = {
-            'small': { w: 20, h: 40 },
-            'large': { w: 30, h: 60 },
-            'group': { w: 60, h: 40 }
-        };
+        const sizes = { 'small': {w:20,h:40}, 'large': {w:30,h:60}, 'group': {w:60,h:40} };
         super(x, y - sizes[type].h, sizes[type].w, sizes[type].h);
         this.type = type;
     }
-
     draw() {
         ctx.fillStyle = '#535353';
         if (this.type === 'small') {
@@ -173,50 +151,23 @@ class Cactus extends Obstacle {
         }
     }
 }
-
 class Pterodactyl extends Obstacle {
-    constructor(x, y) {
-        super(x, y, 50, 30);
-        this.wingToggle = true;
-    }
-
+    constructor(x, y) { super(x, y, 50, 30); this.wingToggle = true; }
     draw() {
         ctx.fillStyle = '#535353';
         ctx.fillRect(this.x, this.y + 10, this.w, 10);
         ctx.fillRect(this.x + this.w, this.y + 5, 15, 10);
-        if (this.wingToggle) {
-            ctx.fillRect(this.x + 10, this.y, 30, 10);
-        } else {
-            ctx.fillRect(this.x + 10, this.y + 20, 30, 10);
-        }
+        if (this.wingToggle) ctx.fillRect(this.x + 10, this.y, 30, 10);
+        else ctx.fillRect(this.x + 10, this.y + 20, 30, 10);
     }
-
-    update() {
-        if (frameCount % 15 === 0) {
-            this.wingToggle = !this.wingToggle;
-        }
-        super.update();
-    }
+    update() { if (frameCount % 15 === 0) this.wingToggle = !this.wingToggle; super.update(); }
 }
-
 class Stone extends Obstacle {
-    constructor(x, y) {
-        super(x, y - 20, 20, 20);
-    }
-    
-    draw() {
-        ctx.fillStyle = '#535353';
-        ctx.fillRect(this.x, this.y, this.w, this.h);
-    }
+    constructor(x, y) { super(x, y - 20, 20, 20); }
+    draw() { ctx.fillStyle = '#535353'; ctx.fillRect(this.x, this.y, this.w, this.h); }
 }
-
 class Cloud {
-    constructor(x, y, size) {
-        this.x = x;
-        this.y = y;
-        this.size = size;
-    }
-
+    constructor(x, y, size) { this.x = x; this.y = y; this.size = size; }
     draw() {
         ctx.fillStyle = 'rgba(83, 83, 83, 0.3)';
         ctx.beginPath();
@@ -225,87 +176,78 @@ class Cloud {
         ctx.arc(this.x + this.size * 2, this.y, this.size * 1.2, 0, Math.PI * 2);
         ctx.fill();
     }
+    update() { this.x -= gameSpeed * 0.5; this.draw(); }
+}
 
-    update() {
-        this.x -= gameSpeed * 0.5; // Parallax effect
-        this.draw();
+// --- Dynamic Ground ---
+let lastGroundFeatureX = 0;
+function spawnGroundFeature(xPos) {
+    const type = Math.random();
+    const yOffset = Math.random() * 6;
+    if (type < 0.75) { // Small dash
+        groundFeatures.push({x: xPos, y: GROUND_Y + 2 + yOffset, w: getRandomInt(10, 25), h: 2});
+    } else { // Small rock/bump
+        groundFeatures.push({x: xPos, y: GROUND_Y + yOffset, w: getRandomInt(4, 8), h: getRandomInt(4, 8)});
     }
 }
+function updateAndDrawGround() {
+    ctx.fillStyle = '#535353';
+    ctx.fillRect(0, GROUND_Y, GAME_WIDTH, 2); // Main ground line
+    
+    lastGroundFeatureX = 0;
+    groundFeatures = groundFeatures.filter(f => f.x + f.w > 0);
+
+    for (const feature of groundFeatures) {
+        feature.x -= gameSpeed;
+        ctx.fillRect(feature.x, feature.y, feature.w, feature.h);
+        if (feature.x + feature.w > lastGroundFeatureX) {
+            lastGroundFeatureX = feature.x + feature.w;
+        }
+    }
+    
+    if (GAME_WIDTH - lastGroundFeatureX > getRandomInt(30, 120)) {
+        spawnGroundFeature(GAME_WIDTH + 5);
+    }
+}
+
 
 // --- Bot AI ---
-function findNextObstacle() {
-    return obstacles.find(obs => obs.x + obs.w > player.x);
-}
-
-// --- !! REPLACED FUNCTION !! ---
+function findNextObstacle() { return obstacles.find(obs => obs.x + obs.w > player.x); }
 function updateBot() {
     const nextObstacle = findNextObstacle();
-
-    if (!nextObstacle) {
-        if (player.isCrouching) player.stopCrouch();
-        return;
-    }
-
-    // --- 1. Decision Making: Analyze the obstacle and decide the best action ---
-
-    let mustCrouch = false;
-    let shouldJump = false; // Simplified from high/low to just "jump"
-    let reactionDistance;
-
+    if (!nextObstacle) { if (player.isCrouching) player.stopCrouch(); return; }
+    let mustCrouch = false, shouldJump = false, reactionDistance;
     if (nextObstacle instanceof Pterodactyl) {
-        // It's a low Pterodactyl that requires crouching
-        if (nextObstacle.y >= GROUND_Y - 80) {
-            mustCrouch = true;
-            reactionDistance = gameSpeed * 20 + (nextObstacle.w / 2);
-        }
-        // High Pterodactyls are ignored, no action needed.
+        if (nextObstacle.y >= GROUND_Y - 80) { mustCrouch = true; reactionDistance = gameSpeed * 20 + (nextObstacle.w/2); }
     } else if (nextObstacle instanceof Cactus && (nextObstacle.type === 'large' || nextObstacle.type === 'group')) {
-        // BIG OBSTACLE: Plan to jump LATE
-        shouldJump = true;
-        // Jump later (closer to the obstacle) for large ones.
-        reactionDistance = gameSpeed * 18.5 + (nextObstacle.w / 2);
+        shouldJump = true; reactionDistance = gameSpeed * 18.5 + (nextObstacle.w/2);
     } else if (nextObstacle instanceof Cactus || nextObstacle instanceof Stone) {
-        // SMALL OBSTACLE (Small Cactus or Stone): Plan to jump EARLIER
-        shouldJump = true;
-        // Jump a bit earlier for smaller obstacles to be safe.
-        reactionDistance = gameSpeed * 21 + (nextObstacle.w / 2);
+        shouldJump = true; reactionDistance = gameSpeed * 21 + (nextObstacle.w/2);
     }
-
-    // --- 2. State Correction: Ensure the bot isn't stuck in the wrong state ---
-    if (player.isCrouching && !mustCrouch) {
-        player.stopCrouch();
-    }
-
-    // --- 3. Action Execution: Perform the decided action if close enough ---
+    if (player.isCrouching && !mustCrouch) player.stopCrouch();
     const distance = nextObstacle.x - player.x;
-
     if (reactionDistance && distance <= reactionDistance && distance > 0) {
-        if (mustCrouch) {
-            player.crouch();
-        } else if (shouldJump) {
-            // ALWAYS perform a full jump to guarantee clearance.
-            // We are no longer calling player.cutJump() for the bot.
-            player.jump();
-        }
+        if (mustCrouch) player.crouch();
+        else if (shouldJump) player.jump();
     }
 }
-
 
 // --- Game Flow & Drawing ---
 function drawInitialScreen() {
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     player.draw();
+    updateAndDrawGround();
     ctx.fillStyle = '#535353';
     ctx.font = '20px "Courier New", Courier, monospace';
     ctx.textAlign = 'center';
     ctx.fillText('Press UP or Tap to Start', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 20);
 }
-
 function drawCountdown() {
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     player.draw();
     obstacles.forEach(obs => obs.draw());
     clouds.forEach(c => c.draw());
+    updateAndDrawGround();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     ctx.fillStyle = 'white';
@@ -313,7 +255,6 @@ function drawCountdown() {
     ctx.textAlign = 'center';
     ctx.fillText(`Demo starting in ${countdownValue}...`, GAME_WIDTH / 2, GAME_HEIGHT / 2);
 }
-
 function resetGame() {
     player = new Player(50, GROUND_Y - DINO_HEIGHT, DINO_WIDTH, DINO_HEIGHT, DINO_CROUCH_WIDTH, DINO_CROUCH_HEIGHT);
     gameSpeed = INITIAL_GAME_SPEED;
@@ -323,11 +264,18 @@ function resetGame() {
     highScoreEl.textContent = highScore;
     obstacles = [];
     clouds = [];
+    groundFeatures = [];
+    lastGroundFeatureX = 0;
     frameCount = 0;
     for(let i = 0; i < 3; i++) spawnCloud();
+    let currentX = 0; // Pre-populate ground features
+    while(currentX < GAME_WIDTH + 100) {
+        spawnGroundFeature(currentX);
+        const lastFeature = groundFeatures[groundFeatures.length - 1];
+        currentX = lastFeature.x + lastFeature.w + getRandomInt(30, 120);
+    }
     gameOverContainer.classList.add('hidden');
 }
-
 function init() {
     resetGame();
     gameState = 'waiting';
@@ -348,29 +296,31 @@ function init() {
         }, 1000);
     }, IDLE_TIMEOUT_DURATION);
 }
-
 function startGame(mode) {
     clearTimeout(demoTimeout);
     clearInterval(countdownInterval);
     if (gameState === 'playing' || gameState === 'demo') return;
-    
-    resetGame(); // Reset score and obstacles when starting
+    resetGame();
     gameState = mode;
 }
-
 function runGameFrame() {
     frameCount++;
     gameSpeed += GAME_SPEED_INCREMENT;
     score++;
-    scoreEl.textContent = Math.floor(score / 10);
+    const displayedScore = Math.floor(score / 10);
+    scoreEl.textContent = displayedScore;
+    
+    // Play sound every 100 points
+    if (displayedScore > 0 && displayedScore % 100 === 0 && score % 10 === 0) {
+        scoreSound.play().catch(e => console.error("Error playing score sound:", e));
+    }
     
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     
+    updateAndDrawGround(); // Draw ground first
+    
     cloudSpawnTimer--;
-    if (cloudSpawnTimer <= 0) {
-        spawnCloud();
-        cloudSpawnTimer = getRandomInt(200, 400);
-    }
+    if (cloudSpawnTimer <= 0) { spawnCloud(); cloudSpawnTimer = getRandomInt(200, 400); }
     clouds = clouds.filter(c => c.x + c.size * 3 > 0);
     clouds.forEach(cloud => cloud.update());
     
@@ -384,32 +334,21 @@ function runGameFrame() {
     obstacles = obstacles.filter(obs => obs.x + obs.w > 0);
     obstacles.forEach(obs => {
         obs.update();
-        if (checkCollision(player.getHitbox(), obs.getHitbox())) {
-            gameState = 'gameOver';
-        }
+        if (checkCollision(player.getHitbox(), obs.getHitbox())) gameState = 'gameOver';
     });
 }
-
 function update() {
     requestAnimationFrame(update);
     switch (gameState) {
-        case 'playing':
-            runGameFrame();
-            break;
-        case 'demo':
-            updateBot();
-            runGameFrame();
-            break;
-        case 'gameOver':
-            showGameOver();
-            break;
+        case 'playing': runGameFrame(); break;
+        case 'demo': updateBot(); runGameFrame(); break;
+        case 'gameOver': showGameOver(); break;
     }
 }
 
 // --- Spawning Logic ---
 let obstacleSpawnTimer = 0;
 let cloudSpawnTimer = 0;
-
 function spawnObstacle() {
     const type = Math.random();
     if (type < 0.2 && obstacles.length === 0) { 
@@ -423,32 +362,21 @@ function spawnObstacle() {
         obstacles.push(new Pterodactyl(GAME_WIDTH, pteroY));
     }
 }
-
 function spawnStoneFormation() {
     const stoneCount = getRandomInt(2, 4);
     const spacing = getRandomInt(100, 150);
-    for (let i = 0; i < stoneCount; i++) {
-        obstacles.push(new Stone(GAME_WIDTH + i * spacing, GROUND_Y));
-    }
+    for (let i = 0; i < stoneCount; i++) obstacles.push(new Stone(GAME_WIDTH + i * spacing, GROUND_Y));
 }
-
-function spawnCloud() {
-    clouds.push(new Cloud(GAME_WIDTH + 50, getRandomInt(30, 100), getRandomInt(15, 30)));
-}
+function spawnCloud() { clouds.push(new Cloud(GAME_WIDTH + 50, getRandomInt(30, 100), getRandomInt(15, 30))); }
 
 // --- Utility & Event Listeners ---
 function checkCollision(box1, box2) {
-    return (
-        box1.x < box2.x + box2.w &&
-        box1.x + box1.w > box2.x &&
-        box1.y < box2.y + box2.h &&
-        box1.y + box1.h > box2.y
-    );
+    return (box1.x < box2.x + box2.w && box1.x + box1.w > box2.x && box1.y < box2.y + box2.h && box1.y + box1.h > box2.y);
 }
-
 let gameOverRendered = false;
 function showGameOver() {
     if (gameOverRendered) return;
+    dieSound.play().catch(e => console.error("Error playing die sound:", e));
     const finalScore = Math.floor(score / 10);
     if (finalScore > highScore) {
         highScore = finalScore;
@@ -458,47 +386,22 @@ function showGameOver() {
     gameOverContainer.classList.remove('hidden');
     gameOverRendered = true;
 }
-
-function getRandomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
+function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 function handleStartInput(isJump) {
-    if (gameState === 'waiting' || gameState === 'countingDown') {
-        startGame('playing');
-        if (isJump) player.jump();
-    } else if (gameState === 'gameOver') {
-        init();
-        gameOverRendered = false;
-    }
+    if (gameState === 'waiting' || gameState === 'countingDown') { startGame('playing'); if (isJump) player.jump(); } 
+    else if (gameState === 'gameOver') { init(); gameOverRendered = false; }
 }
-
 document.addEventListener('keydown', (e) => {
     if (e.repeat) return;
-    if (e.code === 'Space' || e.code === 'ArrowUp') {
-        handleStartInput(true);
-        if (gameState === 'playing') player.jump();
-    } else if (e.code === 'ArrowDown' && gameState === 'playing') {
-        player.crouch();
-    }
+    if (e.code === 'Space' || e.code === 'ArrowUp') { handleStartInput(true); if (gameState === 'playing') player.jump(); } 
+    else if (e.code === 'ArrowDown' && gameState === 'playing') { player.crouch(); }
 });
-
 document.addEventListener('keyup', (e) => {
-    if ((e.code === 'Space' || e.code === 'ArrowUp') && gameState === 'playing') {
-        player.cutJump();
-    } else if (e.code === 'ArrowDown' && gameState === 'playing') {
-        player.stopCrouch();
-    }
+    if ((e.code === 'Space' || e.code === 'ArrowUp') && gameState === 'playing') { player.cutJump(); } 
+    else if (e.code === 'ArrowDown' && gameState === 'playing') { player.stopCrouch(); }
 });
-
-canvas.addEventListener('mousedown', () => {
-    handleStartInput(true);
-    if (gameState === 'playing') player.jump();
-});
-
-canvas.addEventListener('mouseup', () => {
-    if (gameState === 'playing') player.cutJump();
-});
+canvas.addEventListener('mousedown', () => { handleStartInput(true); if (gameState === 'playing') player.jump(); });
+canvas.addEventListener('mouseup', () => { if (gameState === 'playing') player.cutJump(); });
 
 // --- Start ---
 init();
