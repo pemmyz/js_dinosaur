@@ -16,7 +16,6 @@ body {
 canvas {
     background-color: #f7f7f7;
     display: block;
-    border-bottom: 2px solid #535353;
 }
 
 #score-container {
@@ -45,6 +44,55 @@ canvas {
     font-size: 20px;
     margin-top: 10px;
 }
+
+/* --- New Help Menu Styles --- */
+#help-menu {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 350px;
+    padding: 20px;
+    background-color: rgba(247, 247, 247, 0.95);
+    border: 2px solid #535353;
+    text-align: center;
+    color: #535353;
+}
+
+#help-menu h1 {
+    font-size: 28px;
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+
+#help-menu .controls-info {
+    text-align: left;
+    margin-bottom: 25px;
+}
+
+#help-menu .controls-info p {
+    margin: 5px 0;
+}
+
+#help-menu button {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 16px;
+    padding: 10px 20px;
+    border: 2px solid #535353;
+    background-color: #f7f7f7;
+    color: #535353;
+    cursor: pointer;
+    margin-top: 10px;
+}
+
+#help-menu button:hover {
+    background-color: #e0e0e0;
+}
+
+#help-menu #bot-toggle-btn {
+    width: 200px;
+}
+/* --- End New Styles --- */
 
 .hidden {
     display: none;

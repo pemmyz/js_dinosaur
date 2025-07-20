@@ -16,7 +16,25 @@
             <h1>GAME OVER</h1>
             <p>Press Space to Restart</p>
         </div>
+        <!-- New Help Menu -->
+        <div id="help-menu" class="hidden">
+            <h1>Help / Options</h1>
+            <div class="controls-info">
+                <p><strong>Jump:</strong> [SPACE] or [ARROW UP] or [TAP]</p>
+                <p><strong>Crouch:</strong> [ARROW DOWN]</p>
+            </div>
+            <div class="options">
+                <button id="bot-toggle-btn">Bot Mode: OFF</button>
+            </div>
+            <button id="close-help-btn">Close</button>
+        </div>
     </div>
+    <!-- 
+      Sound files (create a 'sounds' folder):
+      - sounds/jump.wav
+      - sounds/die.wav
+      - sounds/score.wav
+    -->
     <script src="script.js"></script>
 </body>
 </html>
