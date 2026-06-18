@@ -5,6 +5,8 @@
 A browser-based clone of the classic Chrome Dino game, written in **HTML5 Canvas + JavaScript**.  
 Includes a **bot mode**, sound effects, and a help/options menu.
 
+## Play it now: https://pemmyz.github.io/js_dinosaur/
+
 ![screenshot](screenshot.png) <!-- Replace with your actual screenshot if available -->
 
 ---
