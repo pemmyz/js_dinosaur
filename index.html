@@ -2,39 +2,52 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>JS Dino Game</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="game-container">
-        <canvas id="gameCanvas"></canvas>
-        <div id="score-container">
-            SCORE: <span id="score">0</span> | HI: <span id="high-score">0</span>
-        </div>
-        <div id="game-over-container" class="hidden">
-            <h1>GAME OVER</h1>
-            <p>Press Space to Restart</p>
-        </div>
-        <!-- New Help Menu -->
-        <div id="help-menu" class="hidden">
-            <h1>Help / Options</h1>
-            <div class="controls-info">
-                <p><strong>Jump:</strong> [SPACE] or [ARROW UP] or [TAP]</p>
-                <p><strong>Crouch:</strong> [ARROW DOWN]</p>
+    <!-- Toggle Fullscreen Button -->
+    <button id="mobile-btn">📱 Fullscreen / Mobile</button>
+
+    <!-- Game Wrapper & Scaled Screen -->
+    <div id="game-wrapper">
+        <div id="screen">
+            <div class="game-container">
+                <canvas id="gameCanvas"></canvas>
+                <div id="score-container">
+                    SCORE: <span id="score">0</span> | HI: <span id="high-score">0</span>
+                </div>
+                <div id="game-over-container" class="hidden">
+                    <h1>GAME OVER</h1>
+                    <p>Press Space to Restart</p>
+                </div>
+                <!-- Help Menu -->
+                <div id="help-menu" class="hidden">
+                    <h1>Help / Options</h1>
+                    <div class="controls-info">
+                        <p><strong>Jump:</strong> [SPACE] or [UP] or [TAP]</p>
+                        <p><strong>Crouch:</strong> [DOWN]</p>
+                    </div>
+                    <div class="options">
+                        <button id="bot-toggle-btn">Bot Mode: OFF</button>
+                    </div>
+                    <button id="close-help-btn">Close</button>
+                </div>
             </div>
-            <div class="options">
-                <button id="bot-toggle-btn">Bot Mode: OFF</button>
-            </div>
-            <button id="close-help-btn">Close</button>
         </div>
     </div>
-    <!-- 
-      Sound files (create a 'sounds' folder):
-      - sounds/jump.wav
-      - sounds/die.wav
-      - sounds/score.wav
-    -->
+
+    <!-- Mobile Touch Controls Overlay -->
+    <div id="mobile-controls">
+        <div id="mobile-action-left">
+            <button id="mobile-down" class="mobile-control-btn">▼</button>
+        </div>
+        <div id="mobile-action-right">
+            <button id="mobile-up" class="mobile-control-btn">▲</button>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html>

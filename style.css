@@ -1,21 +1,52 @@
 body {
     margin: 0;
-    background-color: #f7f7f7;
+    background-color: #e0e0e0;
     display: flex;
     justify-content: center;
     align-items: center;
     height: 100vh;
+    width: 100vw;
     font-family: 'Courier New', Courier, monospace;
+    overflow: hidden; /* Removes empty space and scrollbars */
+}
+
+/* --- THE SCREEN (Fixed Internal Resolution) --- */
+/* Find this block in your style.css and add the transform line */
+#screen {
+    width: 800px;  
+    height: 250px; 
+    background-color: #f7f7f7;
+    position: relative;
+    overflow: hidden;
+    transform-origin: center center;
+    transform: scale(1.5); /* <-- ADD THIS LINE */
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    flex-shrink: 0;
+    border: 2px solid #535353;
 }
 
 .game-container {
-    position: relative;
-    overflow: hidden;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
 }
 
 canvas {
-    background-color: #f7f7f7;
     display: block;
+}
+
+/* --- MOBILE MODE LOCK --- */
+body.mobile-mode {
+    background-color: #000;
+    touch-action: none; /* Disables browser gestures */
+    position: fixed;
+    top: 0; left: 0;
+}
+body.mobile-mode #screen {
+    border: none;
+    box-shadow: none;
 }
 
 #score-container {
@@ -24,6 +55,8 @@ canvas {
     right: 10px;
     font-size: 20px;
     color: #535353;
+    font-weight: bold;
+    z-index: 10;
 }
 
 #game-over-container {
@@ -33,19 +66,12 @@ canvas {
     transform: translate(-50%, -50%);
     text-align: center;
     color: #535353;
+    z-index: 20;
 }
 
-#game-over-container h1 {
-    font-size: 48px;
-    margin: 0;
-}
+#game-over-container h1 { font-size: 48px; margin: 0; }
+#game-over-container p { font-size: 20px; margin-top: 10px; }
 
-#game-over-container p {
-    font-size: 20px;
-    margin-top: 10px;
-}
-
-/* --- New Help Menu Styles --- */
 #help-menu {
     position: absolute;
     top: 50%;
@@ -57,43 +83,70 @@ canvas {
     border: 2px solid #535353;
     text-align: center;
     color: #535353;
+    z-index: 30;
 }
 
-#help-menu h1 {
-    font-size: 28px;
-    margin-top: 0;
-    margin-bottom: 20px;
-}
-
-#help-menu .controls-info {
-    text-align: left;
-    margin-bottom: 25px;
-}
-
-#help-menu .controls-info p {
-    margin: 5px 0;
-}
-
+#help-menu h1 { font-size: 28px; margin-top: 0; margin-bottom: 20px; }
+#help-menu .controls-info { text-align: left; margin-bottom: 25px; }
+#help-menu .controls-info p { margin: 5px 0; font-size: 14px; }
 #help-menu button {
     font-family: 'Courier New', Courier, monospace;
-    font-size: 16px;
-    padding: 10px 20px;
-    border: 2px solid #535353;
-    background-color: #f7f7f7;
+    font-size: 16px; padding: 10px 20px;
+    border: 2px solid #535353; background-color: #f7f7f7;
+    color: #535353; cursor: pointer; margin-top: 10px;
+}
+#help-menu button:hover { background-color: #e0e0e0; }
+#help-menu #bot-toggle-btn { width: 200px; }
+
+.hidden { display: none !important; }
+
+/* --- TOGGLE BUTTON --- */
+#mobile-btn {
+    position: fixed;
+    top: 15px; left: 15px;
+    z-index: 2000;
+    background: #f7f7f7;
     color: #535353;
+    border: 2px solid #535353;
+    font-size: 14px;
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: bold;
+    padding: 10px 15px;
     cursor: pointer;
-    margin-top: 10px;
+    box-shadow: 2px 2px 0px rgba(0,0,0,0.2);
 }
+#mobile-btn:hover { background: #e0e0e0; }
+body.mobile-mode #mobile-btn { display: none; }
 
-#help-menu button:hover {
-    background-color: #e0e0e0;
-}
-
-#help-menu #bot-toggle-btn {
-    width: 200px;
-}
-/* --- End New Styles --- */
-
-.hidden {
+/* --- MOBILE CONTROLS OVERLAY --- */
+#mobile-controls {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 3000;
     display: none;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 30px 40px;
+    box-sizing: border-box;
+}
+body.mobile-mode #mobile-controls { display: flex; }
+
+.mobile-control-btn {
+    pointer-events: auto;
+    width: 80px; height: 80px;
+    background: rgba(83, 83, 83, 0.2);
+    border: 3px solid rgba(83, 83, 83, 0.5);
+    border-radius: 50%;
+    color: rgba(83, 83, 83, 0.8);
+    font-size: 30px;
+    display: flex; justify-content: center; align-items: center;
+    user-select: none;
+    backdrop-filter: blur(2px);
+    transition: transform 0.1s, background 0.1s;
+    -webkit-tap-highlight-color: transparent;
+}
+.mobile-control-btn:active {
+    background: rgba(83, 83, 83, 0.5);
+    transform: scale(0.95);
 }

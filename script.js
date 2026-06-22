@@ -7,7 +7,6 @@ const helpMenu = document.getElementById('help-menu');
 const botToggleBtn = document.getElementById('bot-toggle-btn');
 const closeHelpBtn = document.getElementById('close-help-btn');
 
-
 // --- Game Constants ---
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 250;
@@ -31,12 +30,10 @@ canvas.width = GAME_WIDTH;
 canvas.height = GAME_HEIGHT;
 ctx.imageSmoothingEnabled = false;
 
-// --- Web Audio API Sound Generation ---
+// --- Web Audio API ---
 let audioCtx;
 function initAudio() {
-    if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 }
 function playSound(duration, frequency, volume, type) {
     if (!audioCtx) return;
@@ -55,15 +52,14 @@ function playJumpSound() { playSound(0.15, 880, 0.2, 'sine'); }
 function playDieSound() { playSound(0.3, 120, 0.3, 'square'); }
 function playScoreSound() { playSound(0.1, 1200, 0.2, 'sine'); }
 
-
 // --- Game State ---
 let player, gameSpeed, score, highScore, obstacles, clouds, frameCount, groundFeatures;
-let gameState = 'waiting'; // 'waiting', 'countingDown', 'playing', 'demo', 'gameOver', 'help'
+let gameState = 'waiting'; 
 let demoTimeout, countdownInterval, countdownValue;
 let isBotEnabled = false;
 let normalObstacleCount, stoneSpawnThreshold;
 
-// --- Player (Dino) Object ---
+// --- Objects ---
 class Player {
     constructor(x, y, w, h, crouchW, crouchH) {
         this.x = x; this.y = y; this.w = w; this.h = h; this.crouchW = crouchW; this.crouchH = crouchH;
@@ -101,19 +97,22 @@ class Player {
     crouch() { if (!this.isJumping) this.isCrouching = true; }
     stopCrouch() { this.isCrouching = false; }
     getHitbox() {
-        if (this.isCrouching) return { x: this.x, y: this.y, w: this.crouchW, h: this.crouchH };
-        return { x: this.x, y: this.y, w: this.w, h: this.h };
+        return this.isCrouching 
+            ? { x: this.x, y: this.y, w: this.crouchW, h: this.crouchH }
+            : { x: this.x, y: this.y, w: this.w, h: this.h };
     }
 }
 
-// --- Obstacle & Scenery Classes ---
 class Obstacle {
     constructor(x, y, w, h) { this.x = x; this.y = y; this.w = w; this.h = h; }
     update() { this.x -= gameSpeed; this.draw(); }
     getHitbox() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
 }
 class Cactus extends Obstacle {
-    constructor(x, y, type) { const sizes = { 'small': {w:20,h:40}, 'large': {w:30,h:60}, 'group': {w:60,h:40} }; super(x, y - sizes[type].h, sizes[type].w, sizes[type].h); this.type = type; }
+    constructor(x, y, type) { 
+        const sizes = { 'small': {w:20,h:40}, 'large': {w:30,h:60}, 'group': {w:60,h:40} }; 
+        super(x, y - sizes[type].h, sizes[type].w, sizes[type].h); this.type = type; 
+    }
     draw() {
         ctx.fillStyle = '#535353';
         if (this.type === 'small') { ctx.fillRect(this.x, this.y, this.w, this.h); ctx.fillRect(this.x + 5, this.y - 10, 10, 10); }
@@ -142,7 +141,6 @@ class Cloud {
     update() { this.x -= gameSpeed * 0.5; this.draw(); }
 }
 
-// --- Dynamic Ground ---
 let lastGroundFeatureX = 0;
 function spawnGroundFeature(xPos) {
     const type = Math.random(); const yOffset = Math.random() * 6;
@@ -159,13 +157,9 @@ function updateAndDrawGround() {
     if (GAME_WIDTH - lastGroundFeatureX > getRandomInt(30, 120)) spawnGroundFeature(GAME_WIDTH + 5);
 }
 
-
-// --- MODIFIED: Bot AI ---
+// --- Bot AI (Fixed Jump Logic) ---
 function updateBot() {
-    // Don't make a new decision while in the air. This is key for stone hopping.
-    if (player.isJumping) {
-        return;
-    }
+    if (player.isJumping) return;
 
     const nextObstacles = obstacles.filter(obs => obs.x + obs.w > player.x);
     if (nextObstacles.length === 0) {
@@ -174,71 +168,45 @@ function updateBot() {
     }
     const nextObstacle = nextObstacles[0];
 
-    // Priority 1: Stone Hopping
+    // Priority 1: Stone
     if (nextObstacle instanceof Stone) {
         const reactionDistance = gameSpeed * 15;
         const distance = nextObstacle.x - (player.x + player.w);
-
         if (distance <= reactionDistance && distance > 0) {
             player.jump();
-            setTimeout(() => {
-                if (player.velocityY < 0) player.cutJump();
-            }, 180);
+            setTimeout(() => { if (player.velocityY < 0) player.cutJump(); }, 180);
         }
-        return; // Handle stone and exit
+        return;
     }
 
     let mustCrouch = false;
     let shouldJump = false;
     let reactionDistance;
 
-    // Priority 2: Pterodactyl Logic
+    // Priority 2: Pterodactyl
     if (nextObstacle instanceof Pterodactyl) {
-        // This is a "low-flying" Pterodactyl. The dino must crouch to get under it.
-        // The spawn height is GROUND_Y - 70, this condition correctly identifies it.
-        if (nextObstacle.y >= GROUND_Y - 80) {
-            mustCrouch = true;
-            reactionDistance = gameSpeed * 20;
-        }
-        // Otherwise, it's a "high-flying" Pterodactyl.
-        // The bot will do NOTHING, allowing the dino to run safely underneath.
-        // `shouldJump` remains false.
-
-    // Priority 3: Cactus Logic
-    } else if (nextObstacle instanceof Cactus) {
-        // All cacti must be jumped over.
+        if (nextObstacle.y >= GROUND_Y - 80) { mustCrouch = true; reactionDistance = gameSpeed * 20; }
+    } 
+    // Priority 3: Cactus (Jump just before hitting!)
+    else if (nextObstacle instanceof Cactus) {
         shouldJump = true;
-        // Adjust reaction distance based on obstacle size
-        reactionDistance = (nextObstacle.type === 'large' || nextObstacle.type === 'group') 
-            ? gameSpeed * 18.5 + (nextObstacle.w / 2) 
-            : gameSpeed * 21 + (nextObstacle.w / 2);
+        // Dynamically scale distance based on speed and player width to jump moments before hitting
+        reactionDistance = (gameSpeed * 8.5) + player.w;
     }
 
-    // --- Execute Action ---
-    // Make sure we should not be crouching before attempting to stop.
-    if (player.isCrouching && !mustCrouch) {
-        player.stopCrouch();
-    }
+    if (player.isCrouching && !mustCrouch) player.stopCrouch();
     
-    // If an action was decided, and the obstacle is close enough, perform it.
     if (reactionDistance && nextObstacle.x - player.x <= reactionDistance && nextObstacle.x - player.x > 0) {
-        if (mustCrouch) {
-            player.crouch();
-        } else if (shouldJump) {
-            player.jump();
-        }
+        if (mustCrouch) player.crouch();
+        else if (shouldJump) player.jump();
     }
 }
 
-
-// --- Game Flow & Drawing ---
+// --- Core Flow ---
 function drawInitialScreen() {
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-    player.draw();
-    updateAndDrawGround();
-    ctx.fillStyle = '#535353';
-    ctx.font = '20px "Courier New", Courier, monospace';
-    ctx.textAlign = 'center';
+    player.draw(); updateAndDrawGround();
+    ctx.fillStyle = '#535353'; ctx.font = '20px "Courier New", Courier, monospace'; ctx.textAlign = 'center';
     ctx.fillText('Press UP or Tap to Start', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 20);
     ctx.font = '16px "Courier New", Courier, monospace';
     ctx.fillText("Press 'H' for Help/Options", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 10);
@@ -261,22 +229,15 @@ function resetGame() {
         spawnGroundFeature(currentX); const lastFeature = groundFeatures[groundFeatures.length - 1];
         currentX = lastFeature.x + lastFeature.w + getRandomInt(30, 120);
     }
-    gameOverContainer.classList.add('hidden');
-    helpMenu.classList.add('hidden');
-    normalObstacleCount = 0;
-    stoneSpawnThreshold = getRandomInt(10, 15);
+    gameOverContainer.classList.add('hidden'); helpMenu.classList.add('hidden');
+    normalObstacleCount = 0; stoneSpawnThreshold = getRandomInt(10, 15);
 }
 function returnToWaitingScreen() {
-    clearTimeout(demoTimeout);
-    clearInterval(countdownInterval);
-    gameState = 'waiting';
-    helpMenu.classList.add('hidden');
-    drawInitialScreen();
+    clearTimeout(demoTimeout); clearInterval(countdownInterval);
+    gameState = 'waiting'; helpMenu.classList.add('hidden'); drawInitialScreen();
     demoTimeout = setTimeout(() => {
         if (gameState !== 'waiting') return;
-        gameState = 'countingDown';
-        countdownValue = 5;
-        drawCountdown();
+        gameState = 'countingDown'; countdownValue = 5; drawCountdown();
         countdownInterval = setInterval(() => {
             countdownValue--;
             if (countdownValue <= 0) { clearInterval(countdownInterval); startGame(); }
@@ -284,33 +245,24 @@ function returnToWaitingScreen() {
         }, 1000);
     }, IDLE_TIMEOUT_DURATION);
 }
-function init() {
-    resetGame();
-    returnToWaitingScreen();
-}
+function init() { resetGame(); returnToWaitingScreen(); }
 function startGame() {
-    clearTimeout(demoTimeout);
-    clearInterval(countdownInterval);
+    clearTimeout(demoTimeout); clearInterval(countdownInterval);
     if (gameState === 'playing' || gameState === 'demo') return;
-    resetGame();
-    const mode = isBotEnabled ? 'demo' : 'playing';
-    gameState = mode;
+    resetGame(); gameState = isBotEnabled ? 'demo' : 'playing';
 }
 function runGameFrame() {
     frameCount++; gameSpeed += GAME_SPEED_INCREMENT; score++;
     const displayedScore = Math.floor(score / 10);
     scoreEl.textContent = displayedScore;
-    if (displayedScore > 0 && displayedScore % 100 === 0 && score % 10 === 0) {
-        playScoreSound();
-    }
+    if (displayedScore > 0 && displayedScore % 100 === 0 && score % 10 === 0) playScoreSound();
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     updateAndDrawGround();
     cloudSpawnTimer--; if (cloudSpawnTimer <= 0) { spawnCloud(); cloudSpawnTimer = getRandomInt(200, 400); }
     clouds = clouds.filter(c => c.x + c.size * 3 > 0); clouds.forEach(cloud => cloud.update());
     player.update();
     obstacleSpawnTimer--; if (obstacleSpawnTimer <= 0) {
-        spawnObstacle(); 
-        obstacleSpawnTimer = getRandomInt(60, 140) / (gameSpeed / INITIAL_GAME_SPEED);
+        spawnObstacle(); obstacleSpawnTimer = getRandomInt(60, 140) / (gameSpeed / INITIAL_GAME_SPEED);
     }
     obstacles = obstacles.filter(obs => obs.x + obs.w > 0);
     obstacles.forEach(obs => {
@@ -327,15 +279,12 @@ function update() {
     }
 }
 
-// --- Spawning Logic ---
+// Spawns
 let obstacleSpawnTimer = 0; let cloudSpawnTimer = 0;
-
 function spawnObstacle() {
     if (obstacles.length === 0 && normalObstacleCount >= stoneSpawnThreshold) {
-        spawnStoneFormation();
-        normalObstacleCount = 0;
-        stoneSpawnThreshold = getRandomInt(10, 15);
-        obstacleSpawnTimer = getRandomInt(100, 180) / (gameSpeed / INITIAL_GAME_SPEED);
+        spawnStoneFormation(); normalObstacleCount = 0;
+        stoneSpawnThreshold = getRandomInt(10, 15); obstacleSpawnTimer = getRandomInt(100, 180) / (gameSpeed / INITIAL_GAME_SPEED);
     } else if (obstacles.length === 0) {
         const type = Math.random();
         if (type < 0.7) { 
@@ -348,67 +297,127 @@ function spawnObstacle() {
         normalObstacleCount++;
     }
 }
-
 function spawnStoneFormation() {
-    const stoneCount = getRandomInt(3, 5); 
-    const spacing = getRandomInt(100, 150);
-    for (let i = 0; i < stoneCount; i++) {
-        obstacles.push(new Stone(GAME_WIDTH + i * spacing, GROUND_Y));
-    }
+    const stoneCount = getRandomInt(3, 5); const spacing = getRandomInt(100, 150);
+    for (let i = 0; i < stoneCount; i++) obstacles.push(new Stone(GAME_WIDTH + i * spacing, GROUND_Y));
 }
 function spawnCloud() { clouds.push(new Cloud(GAME_WIDTH + 50, getRandomInt(30, 100), getRandomInt(15, 30))); }
-
-// --- Utility & Event Listeners ---
 function checkCollision(box1, box2) { return (box1.x < box2.x + box2.w && box1.x + box1.w > box2.x && box1.y < box2.y + box2.h && box1.y + box1.h > box2.y); }
+function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
 let gameOverRendered = false;
 function showGameOver() {
-    if (gameOverRendered) return;
-    playDieSound();
+    if (gameOverRendered) return; playDieSound();
     const finalScore = Math.floor(score / 10);
     if (finalScore > highScore) { highScore = finalScore; localStorage.setItem('dinoHighScore', highScore); highScoreEl.textContent = highScore; }
     gameOverContainer.classList.remove('hidden'); gameOverRendered = true;
 }
-function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 
+// Input Handlers
 function handleStartInput(isJump) {
     initAudio(); 
     if (gameState === 'waiting' || gameState === 'countingDown') {
-        startGame(); 
-        if (isJump && gameState === 'playing') player.jump();
-    } else if (gameState === 'gameOver') {
-        init();
-        gameOverRendered = false;
-    }
+        startGame(); if (isJump && gameState === 'playing') player.jump();
+    } else if (gameState === 'gameOver') { init(); gameOverRendered = false; }
 }
+
 document.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     if (e.code === 'Space' || e.code === 'ArrowUp') { handleStartInput(true); if (gameState === 'playing') player.jump(); }
-    else if (e.code === 'ArrowDown' && gameState === 'playing') { player.crouch(); }
-    else if (e.code === 'KeyH' && gameState === 'waiting') {
-        gameState = 'help';
-        helpMenu.classList.remove('hidden');
-        clearTimeout(demoTimeout);
-    }
+    else if (e.code === 'ArrowDown' && gameState === 'playing') player.crouch();
+    else if (e.code === 'KeyH' && gameState === 'waiting') { gameState = 'help'; helpMenu.classList.remove('hidden'); clearTimeout(demoTimeout); }
 });
 document.addEventListener('keyup', (e) => {
-    if ((e.code === 'Space' || e.code === 'ArrowUp') && gameState === 'playing') { player.cutJump(); }
-    else if (e.code === 'ArrowDown' && gameState === 'playing') { player.stopCrouch(); }
+    if ((e.code === 'Space' || e.code === 'ArrowUp') && gameState === 'playing') player.cutJump();
+    else if (e.code === 'ArrowDown' && gameState === 'playing') player.stopCrouch();
 });
-canvas.addEventListener('mousedown', () => { handleStartInput(true); if (gameState === 'playing') player.jump(); });
-canvas.addEventListener('mouseup', () => { if (gameState === 'playing') player.cutJump(); });
 
-// --- Menu Button Listeners ---
+// Menus
 botToggleBtn.addEventListener('click', () => {
     isBotEnabled = !isBotEnabled;
     botToggleBtn.textContent = isBotEnabled ? 'Bot Mode: ON' : 'Bot Mode: OFF';
     botToggleBtn.style.borderColor = isBotEnabled ? '#3c8e40' : '#535353';
     botToggleBtn.style.color = isBotEnabled ? '#3c8e40' : '#535353';
 });
+closeHelpBtn.addEventListener('click', () => returnToWaitingScreen());
 
-closeHelpBtn.addEventListener('click', () => {
-    returnToWaitingScreen();
-});
+// ==========================================
+// SCALING AND MOBILE CONTROLS LOGIC
+// ==========================================
+const mobileToggleBtn = document.getElementById('mobile-btn');
+const mobileControls = document.getElementById('mobile-controls');
+const mobileUpBtn = document.getElementById('mobile-up');
+const mobileDownBtn = document.getElementById('mobile-down');
+const screenElement = document.getElementById("screen");
 
-// --- Start ---
+function scaleGame() {
+    const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement;
+    if (isFullscreen) {
+        // Find best fit while retaining our internal 800x250 ratio
+        const scale = Math.min(window.innerWidth / GAME_WIDTH, window.innerHeight / GAME_HEIGHT);
+        screenElement.style.transform = `scale(${scale})`;
+        document.body.classList.add('mobile-mode');
+    } else {
+        // --- CHANGED: Scale 1.5x in windowed mode instead of 'none' ---
+        screenElement.style.transform = 'scale(1.5)'; 
+        document.body.classList.remove('mobile-mode');
+    }
+}
+
+function goFull() {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+}
+
+window.addEventListener("resize", scaleGame);
+window.addEventListener("fullscreenchange", scaleGame);
+window.addEventListener("webkitfullscreenchange", scaleGame);
+
+if (mobileToggleBtn) mobileToggleBtn.addEventListener('click', goFull);
+
+function setupMobileControls() {
+    if (!mobileControls) return;
+
+    const addControlListener = (element, onAction, offAction) => {
+        const press = (e) => { if (e.cancelable) e.preventDefault(); onAction(); };
+        const release = (e) => { if (e.cancelable) e.preventDefault(); offAction(); };
+
+        element.addEventListener('touchstart', press, { passive: false });
+        element.addEventListener('touchend', release, { passive: false });
+        element.addEventListener('touchcancel', release, { passive: false });
+        
+        element.addEventListener('mousedown', press);
+        element.addEventListener('mouseup', release);
+        element.addEventListener('mouseleave', (e) => { if (e.buttons === 1) release(e); });
+    };
+
+    // Up = Jump 
+    addControlListener(mobileUpBtn, 
+        () => { handleStartInput(true); if (gameState === 'playing') player.jump(); }, 
+        () => { if (gameState === 'playing') player.cutJump(); }
+    );
+    // Down = Crouch
+    addControlListener(mobileDownBtn, 
+        () => { if (gameState === 'playing') player.crouch(); }, 
+        () => { if (gameState === 'playing') player.stopCrouch(); }
+    );
+    
+    // Tap canvas specifically handles jumping/starting if we're not touching the buttons directly
+    canvas.addEventListener('touchstart', (e) => {
+        if(e.cancelable) e.preventDefault();
+        handleStartInput(true); if (gameState === 'playing') player.jump();
+    }, {passive: false});
+    canvas.addEventListener('touchend', (e) => {
+        if(e.cancelable) e.preventDefault();
+        if (gameState === 'playing') player.cutJump();
+    }, {passive: false});
+    canvas.addEventListener('mousedown', () => { handleStartInput(true); if (gameState === 'playing') player.jump(); });
+    canvas.addEventListener('mouseup', () => { if (gameState === 'playing') player.cutJump(); });
+}
+
+// Start
+scaleGame();
+setupMobileControls();
 init();
 update();
